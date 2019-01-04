@@ -8,6 +8,8 @@ This is a re-do of the work in cpp-netlib/cpp-netlib but updated to the latest
 C++ standard. This repository is a from-scratch re-imagining of the solution to
 modern C++ network programming.
 
+IMPORTANT: This is not an officially supported Google product.
+
 ## Goals
 
 * Provide modern composable components for network programming. We'll provide
