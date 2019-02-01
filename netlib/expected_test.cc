@@ -18,6 +18,8 @@
 namespace cppnetlib {
 namespace {
 
+using ::testing::Eq;
+
 using error_code = int;
 
 enum errors : error_code { undefined };
@@ -27,13 +29,29 @@ expected<bool, error_code> f(bool b) {
   return unexpected(errors::undefined);
 }
 
+// For testing support for larger types.
+struct test_data {
+  int64_t first;
+  int64_t second;
+};
+
+expected<test_data, error_code> g(bool b, int64_t first, int64_t second) {
+  if (b) return unexpected{errors::undefined};
+  return test_data{first, second};
+}
+
 TEST(ExpectedTest, Construction) { expected<bool, error_code> e; }
 
 TEST(ExpectedTest, Unexpected) {
-  auto e = f(true);
-  auto g = f(false);
-  ASSERT_FALSE(g);
-  ASSERT_TRUE(e);
+  auto e1 = f(true);
+  ASSERT_TRUE(e1);
+
+  auto e2 = f(false);
+  ASSERT_FALSE(e2);
+
+  auto e3 = g(true, 1, 2);
+  ASSERT_FALSE(e2);
+  EXPECT_THAT(e3.error(), Eq(errors::undefined));
 }
 
 }  // namespace

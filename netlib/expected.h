@@ -14,6 +14,7 @@
 #ifndef CPP_NETLIB_EXPECTED_H_
 #define CPP_NETLIB_EXPECTED_H_
 
+#include <cassert>
 #include <type_traits>
 #include <utility>
 
@@ -205,6 +206,33 @@ class expected {
   }
 
   constexpr explicit operator bool() const noexcept { return has_value_; }
+
+  // Observer functions.
+  constexpr const E& error() const& {
+    assert(!has_value_ &&
+           "expected<T, E> must not have a value when taking an error!");
+    return reinterpret_cast<const unexpected<E>*>(&union_storage_)->value();
+  }
+
+  constexpr E& error() & {
+    assert(!has_value_ &&
+           "expected<T, E> must not have a value when taking an error!");
+    return reinterpret_cast<unexpected<E>*>(&union_storage_)->value();
+  }
+
+  constexpr const E&& error() const&& {
+    assert(!has_value_ &&
+           "expected<T, E> must not have a value when taking an error!");
+    return std::move(*reinterpret_cast<const unexpected<E>*>(&union_storage_))
+        ->value();
+  }
+
+  constexpr E&& error() && {
+    assert(!has_value_ &&
+           "expected<T, E> must not have a value when taking an error!");
+    return std::move(*reinterpret_cast<unexpected<E>*>(&union_storage_))
+        ->value();
+  };
 
  private:
   std::aligned_union_t<8, value_type, unexpected_type> union_storage_;
