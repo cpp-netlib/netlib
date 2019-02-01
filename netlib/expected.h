@@ -62,7 +62,31 @@ struct unexpect_t {
 inline constexpr unexpect_t unexpect{};
 
 template <class E>
-class bad_expected_access {};
+class bad_expected_access;
+
+template <>
+class bad_expected_access<void> {
+ public:
+  virtual const char* what() const noexcept {
+    return "cppnetlib::bad_expected_access";
+  }
+  virtual ~bad_expected_access() {}
+};
+
+template <class E>
+class bad_expected_access : public bad_expected_access<void> {
+ public:
+  explicit bad_expected_access(E e) : val_(e) {}
+  const char* what() const noexcept override {
+    return "cppnetlib::bad_expected_access<E>";
+  }
+  const E& error() const&;
+  E& error() &;
+  E&& error() &&;
+
+ private:
+  E val_;
+};
 
 /// This is a minimal implementation of the proposed P0323R3
 /// std::expected<...> API.
@@ -208,6 +232,26 @@ class expected {
   constexpr explicit operator bool() const noexcept { return has_value_; }
 
   // Observer functions.
+  constexpr const T& operator*() const& {
+    if (!has_value_) throw bad_expected_access<E>(error());
+    return *reinterpret_cast<const T*>(&union_storage_);
+  }
+
+  constexpr T& operator*() & {
+    if (!has_value_) throw bad_expected_access<E>(error());
+    return *reinterpret_cast<T*>(&union_storage_);
+  }
+
+  constexpr const T&& operator*() const&& {
+    if (!has_value_) throw bad_expected_access<E>(error());
+    return std::move(*reinterpret_cast<const T*>(&union_storage_));
+  }
+
+  constexpr T&& operator*() && {
+    if (!has_value_) throw bad_expected_access<E>(error());
+    return std::move(*reinterpret_cast<T*>(&union_storage_));
+  }
+
   constexpr const E& error() const& {
     assert(!has_value_ &&
            "expected<T, E> must not have a value when taking an error!");

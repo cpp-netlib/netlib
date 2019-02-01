@@ -48,6 +48,7 @@ TEST(ExpectedTest, Unexpected) {
 
   auto e2 = f(false);
   ASSERT_FALSE(e2);
+  ASSERT_THROW(*e2, bad_expected_access<error_code>);
 
   auto e3 = g(true, 1, 2);
   ASSERT_FALSE(e2);
