@@ -51,8 +51,14 @@ TEST(ExpectedTest, Unexpected) {
   ASSERT_THROW(*e2, bad_expected_access<error_code>);
 
   auto e3 = g(true, 1, 2);
-  ASSERT_FALSE(e2);
+  ASSERT_FALSE(e3);
   EXPECT_THAT(e3.error(), Eq(errors::undefined));
+  ASSERT_THROW(*e3, bad_expected_access<error_code>);
+
+  e3 = g(false, 2, 3);
+  ASSERT_TRUE(e3);
+  ASSERT_THAT(e3->first, Eq(2));
+  ASSERT_THAT(e3->second, Eq(3));
 }
 
 }  // namespace

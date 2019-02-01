@@ -229,9 +229,72 @@ class expected {
     new (&union_storage_) unexpected<E>(std::move(e.value()));
   }
 
-  constexpr explicit operator bool() const noexcept { return has_value_; }
+  // Destructor.
+  ~expected() {
+    if constexpr (!std::is_trivially_destructible_v<T>) {
+      if (has_value_)
+        reinterpret_cast<T*>(&union_storage_)->~T();
+      else
+        reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+    }
+  }
+
+  // Assignment.
+  expected& operator=(const expected& other) {
+    if (has_value_ and other.has_value_) {
+      **this = *other;
+      return *this;
+    }
+
+    if (!has_value_ and !other.has_value_) {
+      (*reinterpret_cast<unexpected_type*>(&union_storage_)) =
+          unexpected(other.error());
+      return *this;
+    }
+
+    if (has_value_ and !other.has_value_) {
+      reinterpret_cast<T*>(&union_storage_)->~T();
+      new (&union_storage_) unexpected_type(unexpected(other.error()));
+      has_value_ = false;
+      return *this;
+    }
+
+    if (!has_value_ and other.has_value_) {
+      if constexpr (std::is_nothrow_copy_constructible_v<T>) {
+        reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+        new (&union_storage_) T(other.value());
+        has_value_ = true;
+      } else if constexpr (std::is_nothrow_move_constructible_v<T>) {
+        T tmp = *other;
+        reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+        new (&union_storage_) T(tmp);
+        has_value_ = true;
+      } else if constexpr (std::is_nothrow_move_constructible_v<E>) {
+        unexpected_type tmp = unexpected(std::move(error()));
+        reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+        try {
+          new (&union_storage_) T(*other);
+          has_value_ = true;
+        } catch (...) {
+          new (&union_storage_) unexpected_type(std::move(tmp));
+        }
+      }
+    }
+
+    return *this;
+  }
 
   // Observer functions.
+  constexpr const T* operator->() const {
+    if (!has_value_) throw bad_expected_access<E>(error());
+    return reinterpret_cast<const T*>(&union_storage_);
+  }
+
+  constexpr T* operator->() {
+    if (!has_value_) throw bad_expected_access<E>(error());
+    return reinterpret_cast<T*>(&union_storage_);
+  }
+
   constexpr const T& operator*() const& {
     if (!has_value_) throw bad_expected_access<E>(error());
     return *reinterpret_cast<const T*>(&union_storage_);
@@ -251,6 +314,14 @@ class expected {
     if (!has_value_) throw bad_expected_access<E>(error());
     return std::move(*reinterpret_cast<T*>(&union_storage_));
   }
+
+  constexpr explicit operator bool() const noexcept { return has_value_; }
+  constexpr bool has_value() const noexcept { return has_value_; }
+
+  constexpr const T& value() const& { return **this; }
+  constexpr T& value() & { return **this; }
+  constexpr const T&& value() const&& { return std::move(**this); }
+  constexpr T&& value() && { return std::move(**this); }
 
   constexpr const E& error() const& {
     assert(!has_value_ &&
