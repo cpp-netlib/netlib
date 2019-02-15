@@ -259,28 +259,106 @@ class expected {
       return *this;
     }
 
-    if (!has_value_ and other.has_value_) {
-      if constexpr (std::is_nothrow_copy_constructible_v<T>) {
-        reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
-        new (&union_storage_) T(other.value());
+    assert(!has_value_ and other.has_value_);
+    if constexpr (std::is_nothrow_copy_constructible_v<T>) {
+      reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+      new (&union_storage_) T(other.value());
+      has_value_ = true;
+    } else if constexpr (std::is_nothrow_move_constructible_v<T>) {
+      T tmp = *other;
+      reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+      new (&union_storage_) T(tmp);
+      has_value_ = true;
+    } else if constexpr (std::is_nothrow_move_constructible_v<E>) {
+      unexpected_type tmp = unexpected(std::move(error()));
+      reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+      try {
+        new (&union_storage_) T(*other);
         has_value_ = true;
-      } else if constexpr (std::is_nothrow_move_constructible_v<T>) {
-        T tmp = *other;
-        reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
-        new (&union_storage_) T(tmp);
-        has_value_ = true;
-      } else if constexpr (std::is_nothrow_move_constructible_v<E>) {
-        unexpected_type tmp = unexpected(std::move(error()));
-        reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
-        try {
-          new (&union_storage_) T(*other);
-          has_value_ = true;
-        } catch (...) {
-          new (&union_storage_) unexpected_type(std::move(tmp));
-        }
+      } catch (...) {
+        new (&union_storage_) unexpected_type(std::move(tmp));
+        throw;
       }
     }
 
+    return *this;
+  }
+
+  expected& operator=(expected&& other) noexcept(
+      std::is_nothrow_move_assignable_v<T>and
+          std::is_nothrow_move_constructible_v<T>) {
+    if (has_value_ and other.has_value_) {
+      **this = std::move(*other);
+      return *this;
+    }
+
+    if (!has_value_ and !other.has_value_) {
+      (*reinterpret_cast<unexpected_type*>(&union_storage_)) =
+          unexpected(std::move(other.error()));
+      return *this;
+    }
+
+    if (has_value_ and !other.has_value_) {
+      reinterpret_cast<T*>(&union_storage_)->~T();
+      new (&union_storage_) unexpected_type(
+          std::move(std::forward<expected<T, E>>(other).error()));
+      has_value_ = false;
+      return *this;
+    }
+
+    assert(!has_value_ and other.has_value_);
+    if constexpr (std::is_nothrow_move_constructible_v<T>) {
+      reinterpret_cast<T*>(&union_storage_)->~T();
+      new (&union_storage_) T(*std::move(other));
+      has_value_ = true;
+    } else if constexpr (std::is_nothrow_move_constructible_v<E>()) {
+      unexpected_type tmp = unexpected(std::move(error()));
+      reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+      try {
+        new (&union_storage_) T(*std::move(other));
+        has_value_ = true;
+      } catch (...) {
+        new (&union_storage_) unexpected_type(std::move(tmp));
+        throw;
+      }
+    }
+
+    return *this;
+  }
+
+  template <std::enable_if_t<std::is_nothrow_copy_constructible_v<E> and
+                                 std::is_assignable_v<E&, E>,
+                             bool> = false>
+  expected& operator=(const unexpected<E>& e) noexcept(
+      std::is_nothrow_copy_assignable_v<unexpected_type>and
+          std::is_nothrow_copy_constructible_v<unexpected_type>) {
+    if (!has_value_) {
+      (*reinterpret_cast<unexpected_type*>(&union_storage_)) = e;
+      return *this;
+    }
+
+    reinterpret_cast<T*>(&union_storage_)->~T();
+    new (&union_storage_)
+        unexpected_type(unexpected(std::forward<unexpected_type>(e)));
+    has_value_ = false;
+    return *this;
+  }
+
+  template <std::enable_if_t<std::is_nothrow_move_constructible_v<E> and
+                                 std::is_nothrow_move_assignable_v<E>,
+                             bool> = false>
+  expected& operator=(unexpected<E>&& e) noexcept(
+      std::is_nothrow_move_assignable_v<unexpected_type>) {
+    if (!has_value_) {
+      (*reinterpret_cast<unexpected_type*>(&union_storage_)) =
+          unexpected(std::move(std::forward<unexpected<E>>(e)));
+      return *this;
+    }
+
+    reinterpret_cast<T*>(&union_storage_)->~T();
+    new (&union_storage_)
+        unexpected_type(unexpected(std::forward<unexpected_type>(e)));
+    has_value_ = false;
     return *this;
   }
 
@@ -346,7 +424,7 @@ class expected {
     assert(!has_value_ &&
            "expected<T, E> must not have a value when taking an error!");
     return std::move(*reinterpret_cast<unexpected<E>*>(&union_storage_))
-        ->value();
+        .value();
   };
 
  private:
