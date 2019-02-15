@@ -90,8 +90,10 @@ class bad_expected_access : public bad_expected_access<void> {
 
 /// This is a minimal implementation of the proposed P0323R3
 /// std::expected<...> API.
+// TODO: Implement a specilisation of expected<void, E>.
+// TODO: Implement more member functions as needed.
 template <class T, class E>
-class expected {
+class [[nodiscard]] expected {
  public:
   using value_type = T;
   using error_type = E;
@@ -102,16 +104,18 @@ class expected {
     using type = expected<U, error_type>;
   };
 
-  constexpr expected() : has_value_(false) {}
+  constexpr expected() : has_value_(false) {
+    new (&union_storage_) T();
+    has_value_ = true;
+  }
   constexpr expected(const expected& other)
       : union_storage_(other.union_storage_), has_value_(other.has_value_) {}
 
-  constexpr expected(
-      expected&& other,
-      std::enable_if_t<std::is_move_constructible_v<T> &&
-                       std::is_move_constructible_v<E>>* =
-          0) noexcept(std::is_nothrow_move_constructible_v<T>&&
-                          std::is_nothrow_move_constructible_v<E>)
+  constexpr expected(expected && other,
+                     std::enable_if_t < std::is_move_constructible_v<T> &&
+                         std::is_move_constructible_v<E>> * =
+                         0) noexcept(std::is_nothrow_move_constructible_v<T> &&
+                                     std::is_nothrow_move_constructible_v<E>)
       : has_value_(other.has_value_) {
     if (other.has_value_)
       new (union_storage_)
@@ -180,7 +184,7 @@ class expected {
   template <class U = T,
             std::enable_if_t<!std::is_convertible_v<U&&, T>, bool> = false>
   explicit constexpr expected(
-      U&& value,
+      U && value,
       std::enable_if_t<std::is_constructible_v<T, U&&> and
                        !std::is_same_v<std::decay_t<U>, std::in_place_t> and
                        !std::is_same_v<expected<T, E>, std::decay_t<U>> and
@@ -192,7 +196,7 @@ class expected {
   template <class U = T,
             std::enable_if_t<std::is_convertible_v<U&&, T>, bool> = false>
   constexpr expected(
-      U&& value,
+      U && value,
       std::enable_if_t<std::is_constructible_v<T, U&&> and
                        !std::is_same_v<std::decay_t<U>, std::in_place_t> and
                        !std::is_same_v<expected<T, E>, std::decay_t<U>> and
@@ -215,7 +219,7 @@ class expected {
 
   template <class G = E,
             std::enable_if_t<!std::is_convertible_v<G&&, E>, bool> = false>
-  explicit constexpr expected(unexpected<G>&& e) noexcept(
+  explicit constexpr expected(unexpected<G> && e) noexcept(
       std::is_nothrow_move_constructible_v<E, G&&>)
       : has_value_(false) {
     new (&union_storage_) unexpected<E>(std::move(e.value()));
@@ -223,8 +227,8 @@ class expected {
 
   template <class G = E,
             std::enable_if_t<std::is_convertible_v<G&&, E>, bool> = false>
-  constexpr expected(unexpected<G>&& e) noexcept(
-      std::is_nothrow_constructible_v<E, G&&>)
+  constexpr expected(unexpected<G> &&
+                     e) noexcept(std::is_nothrow_constructible_v<E, G&&>)
       : has_value_(false) {
     new (&union_storage_) unexpected<E>(std::move(e.value()));
   }
@@ -285,8 +289,8 @@ class expected {
   }
 
   expected& operator=(expected&& other) noexcept(
-      std::is_nothrow_move_assignable_v<T>and
-          std::is_nothrow_move_constructible_v<T>) {
+      std::is_nothrow_move_assignable_v<T> and
+      std::is_nothrow_move_constructible_v<T>) {
     if (has_value_ and other.has_value_) {
       **this = std::move(*other);
       return *this;
@@ -330,8 +334,8 @@ class expected {
                                  std::is_assignable_v<E&, E>,
                              bool> = false>
   expected& operator=(const unexpected<E>& e) noexcept(
-      std::is_nothrow_copy_assignable_v<unexpected_type>and
-          std::is_nothrow_copy_constructible_v<unexpected_type>) {
+      std::is_nothrow_copy_assignable_v<unexpected_type> and
+      std::is_nothrow_copy_constructible_v<unexpected_type>) {
     if (!has_value_) {
       (*reinterpret_cast<unexpected_type*>(&union_storage_)) = e;
       return *this;
@@ -362,6 +366,39 @@ class expected {
     return *this;
   }
 
+  template <
+      class U,
+      std::enable_if_t<
+          !std::is_same_v<expected<T, E>, std::decay_t<U>> and
+              !std::conjunction_v<std::is_scalar<T>,
+                                  std::is_same<T, std::decay_t<U>>> and
+              std::is_constructible_v<T, U> and std::is_assignable_v<T&, U> and
+              std::is_nothrow_move_constructible_v<E>,
+          bool> = false>
+  expected& operator=(U&& value) {
+    if (has_value_) {
+      this->value() = std::forward<U>(value);
+      return *this;
+    }
+
+    if constexpr (std::is_nothrow_constructible_v<T, U&&>) {
+      reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+      new (&union_storage_) T(std::forward<U>(value));
+      has_value_ = true;
+    } else if constexpr (std::is_nothrow_constructible_v<E, U&&>) {
+      unexpected_type tmp(std::move(error()));
+      reinterpret_cast<unexpected_type*>(&union_storage_)->~unexpected_type();
+      try {
+        new (&union_storage_) T(std::forward<U>(value));
+        has_value_ = true;
+      } catch (...) {
+        new (&union_storage_) unexpected_type(std::move(tmp));
+        throw;
+      }
+    } 
+    return *this;
+  }
+
   // Observer functions.
   constexpr const T* operator->() const {
     if (!has_value_) throw bad_expected_access<E>(error());
@@ -378,7 +415,7 @@ class expected {
     return *reinterpret_cast<const T*>(&union_storage_);
   }
 
-  constexpr T& operator*() & {
+  constexpr T& operator*()& {
     if (!has_value_) throw bad_expected_access<E>(error());
     return *reinterpret_cast<T*>(&union_storage_);
   }
@@ -388,7 +425,7 @@ class expected {
     return std::move(*reinterpret_cast<const T*>(&union_storage_));
   }
 
-  constexpr T&& operator*() && {
+  constexpr T&& operator*()&& {
     if (!has_value_) throw bad_expected_access<E>(error());
     return std::move(*reinterpret_cast<T*>(&union_storage_));
   }
@@ -397,9 +434,9 @@ class expected {
   constexpr bool has_value() const noexcept { return has_value_; }
 
   constexpr const T& value() const& { return **this; }
-  constexpr T& value() & { return **this; }
+  constexpr T& value()& { return **this; }
   constexpr const T&& value() const&& { return std::move(**this); }
-  constexpr T&& value() && { return std::move(**this); }
+  constexpr T&& value()&& { return std::move(**this); }
 
   constexpr const E& error() const& {
     assert(!has_value_ &&
@@ -407,7 +444,7 @@ class expected {
     return reinterpret_cast<const unexpected<E>*>(&union_storage_)->value();
   }
 
-  constexpr E& error() & {
+  constexpr E& error()& {
     assert(!has_value_ &&
            "expected<T, E> must not have a value when taking an error!");
     return reinterpret_cast<unexpected<E>*>(&union_storage_)->value();
@@ -420,7 +457,7 @@ class expected {
         ->value();
   }
 
-  constexpr E&& error() && {
+  constexpr E&& error()&& {
     assert(!has_value_ &&
            "expected<T, E> must not have a value when taking an error!");
     return std::move(*reinterpret_cast<unexpected<E>*>(&union_storage_))

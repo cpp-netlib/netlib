@@ -61,5 +61,42 @@ TEST(ExpectedTest, Unexpected) {
   ASSERT_THAT(e3->second, Eq(3));
 }
 
+TEST(ExpectedTest, AssignmentSimple) {
+  expected<int, error_code> e;
+  ASSERT_NO_THROW(e = 1);
+  EXPECT_THAT(e.value(), Eq(1));
+  ASSERT_NO_THROW(e = {});
+  EXPECT_THAT(e.value(), Eq(int{}));
+  ASSERT_NO_THROW(e = unexpected{errors::undefined});
+  ASSERT_THROW(*e, bad_expected_access<error_code>);
+  EXPECT_THAT(e.error(), Eq(errors::undefined));
+}
+
+struct throwing_copy_exception : public std::exception {
+  const char* what() const noexcept override {
+    return "throwing copy exception";
+  }
+};
+
+struct throwing_copy {
+  throwing_copy() = default;
+  throwing_copy(const throwing_copy& e) { throw throwing_copy_exception(); }
+  throwing_copy& operator=(const throwing_copy&) {
+    throw throwing_copy_exception();
+  }
+  throwing_copy(throwing_copy&&) = default;
+  throwing_copy& operator=(throwing_copy&&) = default;
+  ~throwing_copy() = default;
+};
+
+TEST(ExpectedTest, AssignmentThrowingCopy) {
+  expected<throwing_copy, error_code> instance;
+  ASSERT_NO_THROW(instance = throwing_copy{});
+  throwing_copy tmp;
+  ASSERT_NO_THROW(instance = std::move(tmp));
+  ASSERT_THROW(instance = tmp, throwing_copy_exception);
+  ASSERT_THROW(*instance = tmp, throwing_copy_exception);
+}
+
 }  // namespace
 }  // namespace cppnetlib
